@@ -3,17 +3,177 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:ObdDiag.App"
+        xmlns:vm="clr-namespace:ObdDiag.App.ViewModels"
         mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="ObdDiag - Oto Diagnostik ve İşletme Yönetimi"
-        Height="600" Width="1000"
-        WindowStartupLocation="CenterScreen">
+        Height="680" Width="1080" MinHeight="560" MinWidth="900"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource WindowBackgroundBrush}"
+        Foreground="{StaticResource TextBrush}"
+        FontFamily="Segoe UI" FontSize="14">
     <Grid>
-        <!-- 1. adım: Boş ana pencere. Arayüz sonraki adımlarda doldurulacak. -->
-        <TextBlock Text="ObdDiag"
-                   FontSize="32"
-                   FontWeight="Bold"
-                   HorizontalAlignment="Center"
-                   VerticalAlignment="Center" />
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Üst başlık -->
+        <Border Grid.Row="0" Background="{StaticResource PrimaryBrush}" Padding="24,14">
+            <StackPanel>
+                <TextBlock Text="ObdDiag" FontSize="24" FontWeight="Bold" Foreground="White" />
+                <TextBlock Text="Oto Diagnostik ve İşletme Yönetimi" Foreground="#C9D8E8" />
+            </StackPanel>
+        </Border>
+
+        <!-- Bağlantı paneli -->
+        <Border Grid.Row="1" Style="{StaticResource CardStyle}" Margin="16,16,16,8">
+            <StackPanel>
+                <TextBlock Text="BAĞLANTI" Style="{StaticResource CardTitleStyle}" Margin="0,0,0,10" />
+                <WrapPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,24,8">
+                        <TextBlock Text="COM Port:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <ComboBox Width="110"
+                                  ItemsSource="{Binding Ports}"
+                                  SelectedItem="{Binding SelectedPort}"
+                                  IsEnabled="{Binding CanSelectPort}" />
+                        <Button Content="Yenile" Margin="8,0,0,0"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding RefreshPortsCommand}"
+                                IsEnabled="{Binding CanEditConnection}" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,24,8">
+                        <CheckBox Content="Sahte cihaz kullan" VerticalAlignment="Center"
+                                  IsChecked="{Binding UseFakeDevice}"
+                                  IsEnabled="{Binding CanEditConnection}" />
+                        <ComboBox Width="220" Margin="12,0,0,0"
+                                  ItemsSource="{Binding Scenarios}"
+                                  DisplayMemberPath="Title"
+                                  SelectedItem="{Binding SelectedScenario}"
+                                  IsEnabled="{Binding CanSelectScenario}" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Bağlan" Style="{StaticResource PrimaryButtonStyle}"
+                                Command="{Binding ConnectCommand}" />
+                        <Button Content="Bağlantıyı Kes" Margin="8,0,0,0"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding DisconnectCommand}" />
+                    </StackPanel>
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Gösterge ve arıza alanı -->
+        <Grid Grid.Row="2" Margin="16,8,16,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*" />
+                <ColumnDefinition Width="2*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Canlı veri göstergeleri -->
+            <UniformGrid Grid.Column="0" Columns="2" Rows="2" Margin="0,0,8,0">
+                <Border Style="{StaticResource CardStyle}" Margin="0,0,8,8">
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="MOTOR DEVRİ" Style="{StaticResource CardTitleStyle}" />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding RpmText}" Style="{StaticResource GaugeValueStyle}" />
+                            <TextBlock Text="devir/dk" Style="{StaticResource GaugeUnitStyle}" />
+                        </StackPanel>
+                        <ProgressBar Minimum="0" Maximum="8000" Value="{Binding RpmValue}" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardStyle}" Margin="0,0,0,8">
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="ARAÇ HIZI" Style="{StaticResource CardTitleStyle}" />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding SpeedText}" Style="{StaticResource GaugeValueStyle}" />
+                            <TextBlock Text="km/s" Style="{StaticResource GaugeUnitStyle}" />
+                        </StackPanel>
+                        <ProgressBar Minimum="0" Maximum="240" Value="{Binding SpeedValue}" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardStyle}" Margin="0,0,8,0">
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="MOTOR SICAKLIĞI" Style="{StaticResource CardTitleStyle}" />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding CoolantText}" Style="{StaticResource GaugeValueStyle}" />
+                            <TextBlock Text="°C" Style="{StaticResource GaugeUnitStyle}" />
+                        </StackPanel>
+                        <ProgressBar Minimum="0" Maximum="130" Value="{Binding CoolantValue}" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="GAZ PEDALI" Style="{StaticResource CardTitleStyle}" />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding ThrottleText}" Style="{StaticResource GaugeValueStyle}" />
+                            <TextBlock Text="%" Style="{StaticResource GaugeUnitStyle}" />
+                        </StackPanel>
+                        <ProgressBar Minimum="0" Maximum="100" Value="{Binding ThrottleValue}" />
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
+
+            <!-- Arıza kodları -->
+            <Border Grid.Column="1" Style="{StaticResource CardStyle}" Margin="8,0,0,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="ARIZA KODLARI" Style="{StaticResource CardTitleStyle}" />
+
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,10">
+                        <Button Content="Arızaları Oku" Style="{StaticResource PrimaryButtonStyle}"
+                                Command="{Binding ReadFaultsCommand}" />
+                        <Button Content="Arızaları Sil" Margin="8,0,0,0"
+                                Style="{StaticResource DangerButtonStyle}"
+                                Command="{Binding ClearFaultsCommand}" />
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="2" Text="{Binding FaultsSummary}" Foreground="{StaticResource MutedTextBrush}"
+                               Margin="0,0,0,8" TextWrapping="Wrap" />
+
+                    <ListBox Grid.Row="3" ItemsSource="{Binding FaultCodes}"
+                             BorderThickness="0" Background="Transparent">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" FontFamily="Consolas" FontSize="20" FontWeight="Bold"
+                                           Foreground="{StaticResource DangerBrush}" Margin="0,2" />
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Durum çubuğu -->
+        <Border Grid.Row="3" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource CardBorderBrush}"
+                BorderThickness="0,1,0,0" Padding="24,8">
+            <DockPanel>
+                <ProgressBar DockPanel.Dock="Right" Width="120" IsIndeterminate="True" VerticalAlignment="Center"
+                             Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}" />
+                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" VerticalAlignment="Center">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                    <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </DockPanel>
+        </Border>
     </Grid>
 </Window>
