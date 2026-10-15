@@ -8,6 +8,11 @@
     <PackageReference Include="System.IO.Ports" Version="10.0.13" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Test projesi, sahte seri bağlantı vermek için internal sınıfları görebilsin -->
+    <InternalsVisibleTo Include="ObdDiag.Hardware.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
