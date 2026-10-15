@@ -86,6 +86,19 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
 
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="6,5" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="BorderBrush" Value="#B8C4D0" />
+        </Style>
+
+        <!-- Form alanlarının üstündeki küçük etiketler -->
+        <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Margin" Value="0,8,0,2" />
+        </Style>
+
         <Style TargetType="ProgressBar">
             <Setter Property="Height" Value="10" />
             <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}" />

@@ -48,6 +48,49 @@ public class FakeWithParsersTests
         codes.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData(FakeScenario.Normal, FakeElmTransport.NormalVehicleVin)]
+    [InlineData(FakeScenario.Slow, FakeElmTransport.NormalVehicleVin)]
+    [InlineData(FakeScenario.Faulty, FakeElmTransport.FaultyVehicleVin)]
+    public async Task Vin_From_Fake_Is_Parsed(FakeScenario scenario, string expectedVin)
+    {
+        var fake = await ReadyAsync(scenario);
+
+        VinParser.TryParse(await fake.SendCommandAsync("0902"), out var vin).Should().BeTrue();
+
+        vin.Should().Be(expectedVin);
+        VinValidator.IsValid(vin).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Vin_Response_Has_Can_Multi_Frame_Shape_With_Spaces()
+    {
+        var fake = new FakeElmTransport(FakeScenario.Normal);
+        await fake.ConnectAsync();
+        await fake.SendCommandAsync("ATE0");
+        await fake.SendCommandAsync("0100"); // SEARCHING satırı atlansın
+
+        (await fake.SendCommandAsync("0902")).Should().Be(
+            "014\r0:49 02 01 57 56 57\r1:5A 5A 5A 31 4A 5A 58\r2:57 30 30 30 30 30 31\r\r>");
+    }
+
+    [Fact]
+    public async Task Custom_Vin_Can_Be_Given()
+    {
+        var fake = new FakeElmTransport(FakeScenario.Normal, vin: "1HGCM82633A004352");
+        await fake.ConnectAsync();
+
+        VinParser.TryParse(await fake.SendCommandAsync("0902"), out var vin).Should().BeTrue();
+        vin.Should().Be("1HGCM82633A004352");
+    }
+
+    [Fact]
+    public async Task NotConnected_Vehicle_Gives_No_Vin()
+    {
+        var fake = await ReadyAsync(FakeScenario.NotConnected);
+        VinParser.TryParse(await fake.SendCommandAsync("0902"), out _).Should().BeFalse();
+    }
+
     [Fact]
     public async Task NotConnected_Vehicle_Gives_No_Values()
     {

@@ -10,7 +10,7 @@ namespace ObdDiag.Hardware;
 /// </summary>
 /// <remarks>
 /// Basitleştirmeler: ATL ve ATH komutları "OK" döner ama çıktıyı değiştirmez (başlıklar hep kapalı kabul edilir).
-/// Şasi no (Mod 09) henüz yok; 6. adımda eklenecek. Desteklenmeyen PID'ler "NO DATA" döner.
+/// Şasi no (Mod 09 PID 02) CAN çok parçalı biçimde döner. Desteklenmeyen PID'ler "NO DATA" döner.
 /// </remarks>
 public sealed class FakeElmTransport : IElmTransport
 {
@@ -30,9 +30,11 @@ public sealed class FakeElmTransport : IElmTransport
     /// <param name="scenario">Taklit edilecek durum.</param>
     /// <param name="clock">Geçen süre sayacı. Verir ki testlerde zamanı elle ilerletebilelim; boşsa gerçek saat kullanılır.</param>
     /// <param name="slowDelay">"Yavaş" senaryosunda her komuttaki bekleme süresi (varsayılan 1,2 sn).</param>
-    public FakeElmTransport(FakeScenario scenario = FakeScenario.Normal, Func<TimeSpan>? clock = null, TimeSpan? slowDelay = null)
+    /// <param name="vin">Sahte aracın şasi numarası. Boşsa senaryoya göre hazır bir VIN kullanılır.</param>
+    public FakeElmTransport(FakeScenario scenario = FakeScenario.Normal, Func<TimeSpan>? clock = null, TimeSpan? slowDelay = null, string? vin = null)
     {
         _scenario = scenario;
+        Vin = vin ?? (scenario == FakeScenario.Faulty ? FaultyVehicleVin : NormalVehicleVin);
         _slowDelay = slowDelay ?? TimeSpan.FromMilliseconds(1200);
         if (clock is null)
         {
@@ -42,6 +44,15 @@ public sealed class FakeElmTransport : IElmTransport
         _clock = clock;
         _faultBytes = InitialFaultBytes();
     }
+
+    /// <summary>"Normal" ve "Yavaş" senaryodaki sahte aracın VIN'i.</summary>
+    public const string NormalVehicleVin = "WVWZZZ1JZXW000001";
+
+    /// <summary>"Arızalı" senaryodaki sahte aracın VIN'i.</summary>
+    public const string FaultyVehicleVin = "WDB2030461A123456";
+
+    /// <summary>Bu sahte aracın şasi numarası.</summary>
+    public string Vin { get; }
 
     public bool IsConnected => _connected;
 
@@ -163,6 +174,8 @@ public sealed class FakeElmTransport : IElmTransport
                 return Bytes(0x41, 0x0D, (byte)Speed());
             case "0111":
                 return Bytes(0x41, 0x11, (byte)Math.Round(Throttle() * 255 / 100.0));
+            case "0902":
+                return ReadVin();
             case "03":
                 return ReadFaultCodes();
             case "04":
@@ -179,6 +192,27 @@ public sealed class FakeElmTransport : IElmTransport
         var data = new List<byte> { 0x43, (byte)(_faultBytes.Count / 2) };
         data.AddRange(_faultBytes);
         return Bytes(data.ToArray());
+    }
+
+    /// <summary>
+    /// CAN çok parçalı biçim: önce bayt sayısı ("014" = 20 bayt), sonra numaralı satırlar.
+    /// 49 02 01 başlığı + 17 VIN karakteri = 20 bayt: ilk satırda 3, diğerlerinde 7'şer karakter.
+    /// </summary>
+    private string ReadVin()
+    {
+        var data = new List<byte> { 0x49, 0x02, 0x01 };
+        data.AddRange(Encoding.ASCII.GetBytes(Vin));
+
+        var lines = new List<string> { data.Count.ToString("X3") };
+        var offset = 0;
+        for (var i = 0; offset < data.Count; i++)
+        {
+            var size = i == 0 ? 6 : 7; // ilk satır: 49 02 01 + 3 harf = 6 bayt
+            var chunk = data.Skip(offset).Take(size).ToArray();
+            lines.Add($"{i}:{Bytes(chunk)}");
+            offset += size;
+        }
+        return string.Join("\r", lines);
     }
 
     private List<byte> InitialFaultBytes() =>

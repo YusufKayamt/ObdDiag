@@ -26,6 +26,12 @@ public interface IObdService
     /// <summary>Arıza kodlarını siler.</summary>
     Task ClearFaultCodesAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Aracın şasi numarasını (VIN) okur. Araç bunu desteklemiyorsa veya cevap anlaşılamazsa null döner
+    /// (özellikle eski araçlarda sık görülür).
+    /// </summary>
+    Task<string?> ReadVinAsync(CancellationToken cancellationToken = default);
+
     /// <summary>Bağlantıyı kapatır.</summary>
     Task DisconnectAsync();
 }

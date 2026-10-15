@@ -13,6 +13,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = viewModel;
         DataContext = viewModel;
+
+        // Pencere açılınca müşteri listesini veritabanından yükle.
+        Loaded += async (_, _) => await _viewModel.Customers.InitializeAsync();
     }
 
     protected override void OnClosing(CancelEventArgs e)

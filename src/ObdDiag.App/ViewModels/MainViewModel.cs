@@ -5,6 +5,9 @@ using CommunityToolkit.Mvvm.Input;
 using ObdDiag.App.Services;
 using ObdDiag.Core.Interfaces;
 using ObdDiag.Core.Models;
+using ObdDiag.Core.Parsing;
+using ObdDiag.Data;
+using ObdDiag.Data.Entities;
 using ObdDiag.Hardware;
 
 namespace ObdDiag.App.ViewModels;
@@ -21,16 +24,32 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly IComPortProvider _portProvider;
     private readonly IObdServiceFactory _factory;
     private readonly IDialogService _dialogs;
+    private readonly IWorkshopService _workshop;
 
     private IObdService? _service;
     private CancellationTokenSource? _sessionCts;
     private Task? _pollTask;
 
-    public MainViewModel(IComPortProvider portProvider, IObdServiceFactory factory, IDialogService dialogs)
+    // Teşhis kaydı için: son okunan canlı değerler ve arıza kodları
+    private LiveData? _lastLiveData;
+    private List<string> _readCodes = new();
+    private bool _codesClearedAfterRead;
+
+    public MainViewModel(
+        IComPortProvider portProvider,
+        IObdServiceFactory factory,
+        IDialogService dialogs,
+        IWorkshopService workshop,
+        CustomersViewModel customers)
     {
         _portProvider = portProvider;
         _factory = factory;
         _dialogs = dialogs;
+        _workshop = workshop;
+        Customers = customers;
+
+        // Müşteri ekranında araç kaydedilince, canlı ekrandaki araç bilgisi de güncellensin.
+        Customers.VehicleSaved += OnVehicleSaved;
 
         Scenarios = new[]
         {
@@ -45,8 +64,14 @@ public sealed partial class MainViewModel : ObservableObject
         ResetLiveValues();
     }
 
+    /// <summary>"Müşteri ve Araçlar" sekmesinin ViewModel'i.</summary>
+    public CustomersViewModel Customers { get; }
+
     /// <summary>Canlı verinin ne sıklıkla yenileneceği.</summary>
     public TimeSpan PollInterval { get; set; } = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>Açık sekme: 0 = Canlı Veri, 1 = Müşteri ve Araçlar.</summary>
+    [ObservableProperty] private int _selectedTabIndex;
 
     // ---- Bağlantı paneli ----
 
@@ -68,17 +93,34 @@ public sealed partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanEditConnection), nameof(CanSelectPort), nameof(CanSelectScenario))]
-    [NotifyCanExecuteChangedFor(nameof(ConnectCommand), nameof(DisconnectCommand), nameof(ReadFaultsCommand), nameof(ClearFaultsCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ConnectCommand), nameof(DisconnectCommand), nameof(ReadFaultsCommand), nameof(ClearFaultsCommand), nameof(SaveDiagnosisCommand))]
     private bool _isConnected;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanEditConnection), nameof(CanSelectPort), nameof(CanSelectScenario))]
-    [NotifyCanExecuteChangedFor(nameof(ConnectCommand), nameof(ReadFaultsCommand), nameof(ClearFaultsCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ConnectCommand), nameof(ReadFaultsCommand), nameof(ClearFaultsCommand), nameof(SaveDiagnosisCommand))]
     private bool _isBusy;
 
     public bool CanEditConnection => !IsConnected && !IsBusy;
     public bool CanSelectPort => CanEditConnection && !UseFakeDevice;
     public bool CanSelectScenario => CanEditConnection && UseFakeDevice;
+
+    // ---- Araç tanıma ----
+
+    /// <summary>Şasi numarası kutusu: araçtan otomatik dolar, okunamazsa elle yazılır.</summary>
+    [ObservableProperty] private string _vinInput = string.Empty;
+
+    [ObservableProperty] private string _vehicleInfoText = "Araç henüz tanınmadı. Bağlanınca şasi numarası otomatik okunur.";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasVehicle))]
+    [NotifyCanExecuteChangedFor(nameof(SaveDiagnosisCommand))]
+    private Vehicle? _currentVehicle;
+
+    /// <summary>VIN geçerli ama kayıtlı değil: "Yeni araç olarak kaydet" düğmesi görünür.</summary>
+    [ObservableProperty] private bool _canRegisterVehicle;
+
+    public bool HasVehicle => CurrentVehicle is not null;
 
     // ---- Canlı veri ----
 
@@ -100,6 +142,11 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private string _faultsSummary = "Henüz arıza kodu okunmadı.";
 
+    // ---- Teşhisi kaydetme ----
+
+    [ObservableProperty] private string _repairNote = string.Empty;
+    [ObservableProperty] private string _repairMileage = string.Empty;
+
     // ---- Durum çubuğu ----
 
     [ObservableProperty]
@@ -108,7 +155,7 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private bool _isStatusError;
 
-    // ---- Komutlar ----
+    // ================= Komutlar =================
 
     [RelayCommand]
     private void RefreshPorts()
@@ -135,6 +182,13 @@ public sealed partial class MainViewModel : ObservableObject
         try
         {
             await service.InitializeAsync(token);
+
+            SetStatus("Araç tanınıyor...");
+            await IdentifyVehicleAsync(service, token);
+
+            _lastLiveData = null;
+            _readCodes = new List<string>();
+            _codesClearedAfterRead = false;
 
             _service = service;
             IsConnected = true;
@@ -179,6 +233,9 @@ public sealed partial class MainViewModel : ObservableObject
             foreach (var code in codes)
                 FaultCodes.Add(code);
 
+            _readCodes = codes.ToList();
+            _codesClearedAfterRead = false;
+
             FaultsSummary = codes.Count == 0 ? "Arıza kodu bulunamadı. ✔" : $"{codes.Count} arıza kodu bulundu.";
             SetStatus("Arıza kodları okundu.");
         }
@@ -214,9 +271,89 @@ public sealed partial class MainViewModel : ObservableObject
         {
             await service.ClearFaultCodesAsync(_sessionCts?.Token ?? CancellationToken.None);
 
+            // Okunmuş kodlar tamir kaydına "silindi" notuyla girebilsin diye saklı kalır.
+            _codesClearedAfterRead = true;
+
             FaultCodes.Clear();
             FaultsSummary = "Arıza kodları silindi.";
             SetStatus("Arıza kodları silindi.");
+        }
+        catch (Exception ex)
+        {
+            SetStatus(Describe(ex), isError: true);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    // ---- Araç bulma / kaydetme ----
+
+    [RelayCommand]
+    private Task FindVehicleAsync() => LookupVehicleAsync(VinInput);
+
+    [RelayCommand]
+    private void RegisterVehicle()
+    {
+        var error = VinValidator.GetError(VinInput);
+        if (error is not null)
+        {
+            VehicleInfoText = error;
+            return;
+        }
+
+        Customers.PrepareNewVehicle(VinValidator.Normalize(VinInput));
+        SelectedTabIndex = 1;
+    }
+
+    private bool CanSaveDiagnosis() => IsConnected && !IsBusy && CurrentVehicle is not null;
+
+    /// <summary>Okunan arıza kodlarını ve son canlı değerleri aracın tamir geçmişine kaydeder.</summary>
+    [RelayCommand(CanExecute = nameof(CanSaveDiagnosis))]
+    private async Task SaveDiagnosisAsync()
+    {
+        var vehicle = CurrentVehicle;
+        if (vehicle is null) return;
+
+        int? mileage = null;
+        if (!string.IsNullOrWhiteSpace(RepairMileage))
+        {
+            if (!int.TryParse(RepairMileage.Replace(".", "").Replace(" ", ""), out var km))
+            {
+                SetStatus("Kilometre sadece rakamlardan oluşmalı.", isError: true);
+                return;
+            }
+            mileage = km;
+        }
+
+        var record = new RepairRecord
+        {
+            VehicleId = vehicle.Id,
+            Date = DateTime.Now,
+            Mileage = mileage,
+            Description = string.IsNullOrWhiteSpace(RepairNote) ? "Teşhis (arıza kodu ve canlı veri okuma)" : RepairNote.Trim(),
+            DtcRecords = _readCodes.Select(c => new DtcRecord { Code = c, WasCleared = _codesClearedAfterRead }).ToList()
+        };
+        if (_lastLiveData is { } d)
+        {
+            record.LiveDataSnapshots.Add(new LiveDataSnapshot
+            {
+                CapturedAt = DateTime.Now,
+                Rpm = d.Rpm,
+                Speed = d.Speed,
+                CoolantTemp = d.CoolantTemp,
+                Throttle = d.Throttle
+            });
+        }
+
+        IsBusy = true;
+        try
+        {
+            await _workshop.AddRepairAsync(record);
+            RepairNote = string.Empty;
+            await Customers.RefreshHistoryAsync(vehicle.Id);
+            SetStatus("Teşhis, aracın tamir geçmişine kaydedildi.");
         }
         catch (Exception ex)
         {
@@ -237,7 +374,85 @@ public sealed partial class MainViewModel : ObservableObject
             SafeDisconnectAsync(service).GetAwaiter().GetResult();
     }
 
-    // ---- Canlı veri döngüsü ----
+    // ================= Araç tanıma =================
+
+    /// <summary>Araçtan VIN okumayı dener; okuyabilirse kayıtlı aracı arar. Okunamazsa bağlantıyı bozmaz.</summary>
+    private async Task IdentifyVehicleAsync(IObdService service, CancellationToken token)
+    {
+        string? vin = null;
+        try
+        {
+            vin = await service.ReadVinAsync(token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // VIN okuma desteklenmeyebilir; diğer işlemler yine de çalışsın.
+        }
+
+        if (vin is null)
+        {
+            CurrentVehicle = null;
+            CanRegisterVehicle = false;
+            VinInput = string.Empty;
+            VehicleInfoText = "Araçtan şasi numarası okunamadı (eski araçlarda normaldir). Numarayı aşağıya yazıp \"Aracı Bul\"a basabilirsiniz.";
+            return;
+        }
+
+        VinInput = vin;
+        await LookupVehicleAsync(vin);
+    }
+
+    private async Task LookupVehicleAsync(string vinText)
+    {
+        var error = VinValidator.GetError(vinText);
+        if (error is not null)
+        {
+            CurrentVehicle = null;
+            CanRegisterVehicle = false;
+            VehicleInfoText = error;
+            return;
+        }
+
+        var vin = VinValidator.Normalize(vinText);
+        try
+        {
+            var vehicle = await _workshop.FindVehicleByVinAsync(vin);
+            CurrentVehicle = vehicle;
+            CanRegisterVehicle = vehicle is null;
+            VehicleInfoText = vehicle is null
+                ? $"Bu şasi numarası kayıtlı değil: {vin}"
+                : DescribeVehicle(vehicle);
+        }
+        catch (Exception ex)
+        {
+            CurrentVehicle = null;
+            CanRegisterVehicle = false;
+            VehicleInfoText = $"Kayıtlı araç aranırken sorun oluştu: {ex.Message}";
+        }
+    }
+
+    private static string DescribeVehicle(Vehicle v)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(v.Plate)) parts.Add(v.Plate!);
+        var car = $"{v.Make} {v.Model}".Trim();
+        if (car.Length > 0) parts.Add(car);
+        var name = parts.Count > 0 ? string.Join(" — ", parts) : v.Vin;
+        return $"Kayıtlı araç: {name}  |  Müşteri: {v.Customer?.FullName ?? "?"}";
+    }
+
+    private void OnVehicleSaved(object? sender, Vehicle saved)
+    {
+        // Şu an ekranda yazılı VIN ile aynı araç kaydedildiyse bilgi kutusunu yenile.
+        if (VinValidator.Normalize(VinInput) == saved.Vin)
+            _ = LookupVehicleAsync(saved.Vin);
+    }
+
+    // ================= Canlı veri döngüsü =================
 
     /// <summary>Bağlıyken belli aralıkla değerleri okur. Art arda hata olursa bağlantıyı keser.</summary>
     private async Task RunPollingAsync(IObdService service, CancellationToken token)
@@ -253,6 +468,7 @@ public sealed partial class MainViewModel : ObservableObject
                 if (data.Rpm is null && data.Speed is null && data.CoolantTemp is null && data.Throttle is null)
                     throw new ObdException("Araçtan hiç veri gelmedi.");
 
+                _lastLiveData = data;
                 ShowLiveData(data);
                 failures = 0;
             }
@@ -302,7 +518,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void ResetLiveValues() => ShowLiveData(new LiveData(null, null, null, null));
 
-    // ---- Yardımcılar ----
+    // ================= Yardımcılar =================
 
     private async Task DisconnectCoreAsync(bool waitForPolling)
     {
@@ -341,6 +557,7 @@ public sealed partial class MainViewModel : ObservableObject
     private static string Describe(Exception ex) => ex switch
     {
         ObdException => ex.Message,
+        DataValidationException => ex.Message,
         TimeoutException => ex.Message,
         OperationCanceledException => "İşlem iptal edildi.",
         UnauthorizedAccessException => "Port açılamadı. Başka bir program bu cihazı kullanıyor olabilir; onu kapatıp tekrar deneyin.",

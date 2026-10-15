@@ -82,6 +82,14 @@ public sealed class ObdService : IObdService
             throw new ObdException("Arıza kodları silinemedi. Araç silme isteğini onaylamadı. Kontağın açık olduğundan emin olun.");
     }
 
+    public async Task<string?> ReadVinAsync(CancellationToken cancellationToken = default)
+    {
+        EnsureInitialized();
+
+        var answer = await AskAsync("0902", cancellationToken).ConfigureAwait(false);
+        return VinParser.TryParse(answer, out var vin) ? vin : null;
+    }
+
     public async Task DisconnectAsync()
     {
         IsInitialized = false;

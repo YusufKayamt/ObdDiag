@@ -233,6 +233,34 @@ public class ObdServiceTests
     }
 
     [Fact]
+    public async Task ReadVin_Returns_Vin_When_Vehicle_Supports_It()
+    {
+        var s = new Setup();
+        s.Answers["0902"] = "014\r0:490201575657\r1:5A5A5A314A5A58\r2:57303030303031\r\r>";
+        var service = s.Service;
+        await service.InitializeAsync();
+
+        (await service.ReadVinAsync()).Should().Be("WVWZZZ1JZXW000001");
+    }
+
+    [Fact]
+    public async Task ReadVin_Returns_Null_When_Not_Supported()
+    {
+        var s = new Setup(); // 0902 -> NO DATA
+        var service = s.Service;
+        await service.InitializeAsync();
+
+        (await service.ReadVinAsync()).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReadVin_Before_Initialize_Throws()
+    {
+        var service = new Setup().Service;
+        await ((Func<Task>)(() => service.ReadVinAsync())).Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task Cancellation_Token_Is_Passed_To_Transport()
     {
         var s = new Setup();

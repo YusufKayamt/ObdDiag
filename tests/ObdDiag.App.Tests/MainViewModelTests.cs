@@ -4,6 +4,8 @@ using ObdDiag.App.Services;
 using ObdDiag.App.ViewModels;
 using ObdDiag.Core.Interfaces;
 using ObdDiag.Core.Models;
+using ObdDiag.Data;
+using ObdDiag.Data.Entities;
 using ObdDiag.Hardware;
 
 namespace ObdDiag.App.Tests;
@@ -14,11 +16,14 @@ public class MainViewModelTests
     private readonly Mock<IObdServiceFactory> _factory = new();
     private readonly Mock<IDialogService> _dialogs = new();
     private readonly Mock<IObdService> _service = new();
+    private readonly Mock<IWorkshopService> _workshop = new();
 
     private ConnectionSettings? _lastSettings;
 
     public MainViewModelTests()
     {
+        _workshop.Setup(w => w.GetCustomersAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<Customer>());
         _ports.Setup(p => p.GetPortNames()).Returns(new[] { "COM3", "COM4" });
         _factory.Setup(f => f.Create(It.IsAny<ConnectionSettings>()))
             .Callback<ConnectionSettings>(s => _lastSettings = s)
@@ -33,10 +38,12 @@ public class MainViewModelTests
         _service.Setup(s => s.ClearFaultCodesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
     }
 
-    private MainViewModel Create() => new(_ports.Object, _factory.Object, _dialogs.Object)
-    {
-        PollInterval = TimeSpan.FromMilliseconds(10)
-    };
+    private MainViewModel Create(IObdServiceFactory? factory = null) =>
+        new(_ports.Object, factory ?? _factory.Object, _dialogs.Object, _workshop.Object,
+            new CustomersViewModel(_workshop.Object, _dialogs.Object))
+        {
+            PollInterval = TimeSpan.FromMilliseconds(10)
+        };
 
     private static async Task WaitUntil(Func<bool> condition)
     {
@@ -370,8 +377,8 @@ public class MainViewModelTests
     [Fact]
     public async Task End_To_End_With_Real_Fake_Device()
     {
-        var factory = new ObdServiceFactory();
-        var vm = new MainViewModel(_ports.Object, factory, _dialogs.Object) { PollInterval = TimeSpan.FromMilliseconds(20) };
+        var vm = Create(new ObdServiceFactory());
+        vm.PollInterval = TimeSpan.FromMilliseconds(20);
         _dialogs.Setup(d => d.Confirm(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
         vm.SelectedScenario = vm.Scenarios.First(s => s.Value == FakeScenario.Faulty);
 
@@ -393,7 +400,7 @@ public class MainViewModelTests
     [Fact]
     public async Task End_To_End_NotConnected_Vehicle_Shows_Error()
     {
-        var vm = new MainViewModel(_ports.Object, new ObdServiceFactory(), _dialogs.Object);
+        var vm = Create(new ObdServiceFactory());
         vm.SelectedScenario = vm.Scenarios.First(s => s.Value == FakeScenario.NotConnected);
 
         await vm.ConnectCommand.ExecuteAsync(null);
