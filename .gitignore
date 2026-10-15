@@ -1,0 +1,26 @@
+## Derleme çıktıları
+bin/
+obj/
+publish/
+
+## Visual Studio / VS Code / Rider
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+## Test sonuçları
+TestResults/
+*.trx
+coverage*.xml
+
+## Yerel veritabanı dosyaları (müşteri verisi git'e girmesin)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+
+## Diğer
+*.log
+.claude/
