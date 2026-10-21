@@ -25,6 +25,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly IObdServiceFactory _factory;
     private readonly IDialogService _dialogs;
     private readonly IWorkshopService _workshop;
+    private readonly IReportService _reports;
 
     private IObdService? _service;
     private CancellationTokenSource? _sessionCts;
@@ -40,20 +41,26 @@ public sealed partial class MainViewModel : ObservableObject
         IObdServiceFactory factory,
         IDialogService dialogs,
         IWorkshopService workshop,
-        CustomersViewModel customers)
+        IReportService reports,
+        CustomersViewModel customers,
+        SettingsViewModel settings)
     {
         _portProvider = portProvider;
         _factory = factory;
         _dialogs = dialogs;
         _workshop = workshop;
+        _reports = reports;
         Customers = customers;
+        Settings = settings;
 
         // Müşteri ekranında araç kaydedilince, canlı ekrandaki araç bilgisi de güncellensin.
         Customers.VehicleSaved += OnVehicleSaved;
 
+        // İlk seçenek varsayılandır: serviste en sık görülen durum, rölantide bekleyen araç.
         Scenarios = new[]
         {
-            new ScenarioOption("Normal araç", FakeScenario.Normal),
+            new ScenarioOption("Rölantide bekleyen araç", FakeScenario.Idle),
+            new ScenarioOption("Yolda giden araç", FakeScenario.Normal),
             new ScenarioOption("Arızalı araç (P0104, P0301)", FakeScenario.Faulty),
             new ScenarioOption("Araç bağlı değil", FakeScenario.NotConnected),
             new ScenarioOption("Yavaş cevap veren araç", FakeScenario.Slow),
@@ -67,10 +74,13 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>"Müşteri ve Araçlar" sekmesinin ViewModel'i.</summary>
     public CustomersViewModel Customers { get; }
 
+    /// <summary>"Ayarlar" sekmesinin ViewModel'i (rapordaki işletme bilgileri).</summary>
+    public SettingsViewModel Settings { get; }
+
     /// <summary>Canlı verinin ne sıklıkla yenileneceği.</summary>
     public TimeSpan PollInterval { get; set; } = TimeSpan.FromMilliseconds(500);
 
-    /// <summary>Açık sekme: 0 = Canlı Veri, 1 = Müşteri ve Araçlar.</summary>
+    /// <summary>Açık sekme: 0 = Canlı Veri, 1 = Müşteri ve Araçlar, 2 = Ayarlar.</summary>
     [ObservableProperty] private int _selectedTabIndex;
 
     // ---- Bağlantı paneli ----
@@ -93,12 +103,12 @@ public sealed partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanEditConnection), nameof(CanSelectPort), nameof(CanSelectScenario))]
-    [NotifyCanExecuteChangedFor(nameof(ConnectCommand), nameof(DisconnectCommand), nameof(ReadFaultsCommand), nameof(ClearFaultsCommand), nameof(SaveDiagnosisCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ConnectCommand), nameof(DisconnectCommand), nameof(ReadFaultsCommand), nameof(ClearFaultsCommand), nameof(SaveDiagnosisCommand), nameof(SaveDiagnosisWithReportCommand))]
     private bool _isConnected;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanEditConnection), nameof(CanSelectPort), nameof(CanSelectScenario))]
-    [NotifyCanExecuteChangedFor(nameof(ConnectCommand), nameof(ReadFaultsCommand), nameof(ClearFaultsCommand), nameof(SaveDiagnosisCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ConnectCommand), nameof(ReadFaultsCommand), nameof(ClearFaultsCommand), nameof(SaveDiagnosisCommand), nameof(SaveDiagnosisWithReportCommand))]
     private bool _isBusy;
 
     public bool CanEditConnection => !IsConnected && !IsBusy;
@@ -114,7 +124,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasVehicle))]
-    [NotifyCanExecuteChangedFor(nameof(SaveDiagnosisCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SaveDiagnosisCommand), nameof(SaveDiagnosisWithReportCommand))]
     private Vehicle? _currentVehicle;
 
     /// <summary>VIN geçerli ama kayıtlı değil: "Yeni araç olarak kaydet" düğmesi görünür.</summary>
@@ -311,7 +321,13 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>Okunan arıza kodlarını ve son canlı değerleri aracın tamir geçmişine kaydeder.</summary>
     [RelayCommand(CanExecute = nameof(CanSaveDiagnosis))]
-    private async Task SaveDiagnosisAsync()
+    private Task SaveDiagnosisAsync() => SaveDiagnosisCoreAsync(withReport: false);
+
+    /// <summary>Teşhisi kaydeder, ardından bu kaydın PDF arıza raporunu oluşturur.</summary>
+    [RelayCommand(CanExecute = nameof(CanSaveDiagnosis))]
+    private Task SaveDiagnosisWithReportAsync() => SaveDiagnosisCoreAsync(withReport: true);
+
+    private async Task SaveDiagnosisCoreAsync(bool withReport)
     {
         var vehicle = CurrentVehicle;
         if (vehicle is null) return;
@@ -348,9 +364,10 @@ public sealed partial class MainViewModel : ObservableObject
         }
 
         IsBusy = true;
+        RepairRecord saved;
         try
         {
-            await _workshop.AddRepairAsync(record);
+            saved = await _workshop.AddRepairAsync(record);
             RepairNote = string.Empty;
             await Customers.RefreshHistoryAsync(vehicle.Id);
             SetStatus("Teşhis, aracın tamir geçmişine kaydedildi.");
@@ -358,6 +375,30 @@ public sealed partial class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             SetStatus(Describe(ex), isError: true);
+            IsBusy = false;
+            return;
+        }
+
+        try
+        {
+            if (!withReport)
+                return;
+
+            if (vehicle.Customer is not { } customer)
+            {
+                SetStatus("Teşhis kaydedildi ama aracın müşterisi bulunamadığı için rapor oluşturulamadı.", isError: true);
+                return;
+            }
+
+            SetStatus("Teşhis kaydedildi. PDF rapor hazırlanıyor...");
+            var path = await _reports.ExportAsync(customer, vehicle, saved);
+            SetStatus(path is null
+                ? "Teşhis kaydedildi. PDF rapor oluşturulmadı (kayıt yeri seçilmedi)."
+                : $"Teşhis kaydedildi ve PDF rapor oluşturuldu: {path}");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Teşhis kaydedildi ama PDF rapor oluşturulamadı. {ReportService.DescribeError(ex)}", isError: true);
         }
         finally
         {

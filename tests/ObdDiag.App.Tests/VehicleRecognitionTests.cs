@@ -20,6 +20,7 @@ public class VehicleRecognitionTests
     private readonly Mock<IDialogService> _dialogs = new();
     private readonly Mock<IObdService> _service = new();
     private readonly Mock<IWorkshopService> _workshop = new();
+    private readonly Mock<IReportService> _reports = new();
 
     private static readonly Vehicle KnownVehicle = new()
     {
@@ -46,9 +47,12 @@ public class VehicleRecognitionTests
             .ReturnsAsync((RepairRecord r, CancellationToken _) => r);
     }
 
-    private MainViewModel Create() =>
-        new(_ports.Object, _factory.Object, _dialogs.Object, _workshop.Object,
-            new CustomersViewModel(_workshop.Object, _dialogs.Object))
+    private MainViewModel Create() => Create(_factory.Object, _workshop.Object);
+
+    private MainViewModel Create(IObdServiceFactory factory, IWorkshopService workshop) =>
+        new(_ports.Object, factory, _dialogs.Object, workshop, _reports.Object,
+            new CustomersViewModel(workshop, _dialogs.Object, _reports.Object),
+            TestViewModels.Settings(_dialogs.Object))
         { PollInterval = TimeSpan.FromMilliseconds(10) };
 
     private static async Task WaitUntil(Func<bool> condition)
@@ -332,6 +336,84 @@ public class VehicleRecognitionTests
         await vm.DisconnectCommand.ExecuteAsync(null);
     }
 
+    // ---- Kaydet + PDF rapor ----
+
+    [Fact]
+    public async Task SaveWithReport_Saves_Then_Exports_With_Customer_And_Saved_Record()
+    {
+        RepairRecord? exported = null;
+        Customer? exportedCustomer = null;
+        _reports.Setup(r => r.ExportAsync(It.IsAny<Customer>(), It.IsAny<Vehicle>(), It.IsAny<RepairRecord>()))
+            .Callback<Customer, Vehicle, RepairRecord>((c, _, rec) => { exportedCustomer = c; exported = rec; })
+            .ReturnsAsync(@"C:\Raporlar\rapor.pdf");
+        var vm = await ConnectedAsync();
+        await vm.ReadFaultsCommand.ExecuteAsync(null);
+        vm.RepairNote = "Buji değişti";
+
+        vm.SaveDiagnosisWithReportCommand.CanExecute(null).Should().BeTrue();
+        await vm.SaveDiagnosisWithReportCommand.ExecuteAsync(null);
+
+        _workshop.Verify(w => w.AddRepairAsync(It.IsAny<RepairRecord>(), It.IsAny<CancellationToken>()), Times.Once);
+        exportedCustomer!.FullName.Should().Be("Ali Yılmaz");
+        exported!.Description.Should().Be("Buji değişti");
+        exported.DtcRecords.Select(d => d.Code).Should().Equal("P0104", "P0301");
+        vm.StatusMessage.Should().Contain("PDF rapor oluşturuldu").And.Contain("rapor.pdf");
+        vm.IsStatusError.Should().BeFalse();
+        await vm.DisconnectCommand.ExecuteAsync(null);
+    }
+
+    [Fact]
+    public async Task SaveWithReport_Cancelled_Dialog_Still_Keeps_The_Record()
+    {
+        _reports.Setup(r => r.ExportAsync(It.IsAny<Customer>(), It.IsAny<Vehicle>(), It.IsAny<RepairRecord>()))
+            .ReturnsAsync((string?)null);
+        var vm = await ConnectedAsync();
+
+        await vm.SaveDiagnosisWithReportCommand.ExecuteAsync(null);
+
+        _workshop.Verify(w => w.AddRepairAsync(It.IsAny<RepairRecord>(), It.IsAny<CancellationToken>()), Times.Once);
+        vm.StatusMessage.Should().Contain("kaydedildi").And.Contain("PDF rapor oluşturulmadı");
+        vm.IsStatusError.Should().BeFalse();
+        await vm.DisconnectCommand.ExecuteAsync(null);
+    }
+
+    [Fact]
+    public async Task SaveWithReport_File_Error_Is_Explained_But_Record_Is_Saved()
+    {
+        _reports.Setup(r => r.ExportAsync(It.IsAny<Customer>(), It.IsAny<Vehicle>(), It.IsAny<RepairRecord>()))
+            .ThrowsAsync(new IOException("kilitli"));
+        var vm = await ConnectedAsync();
+
+        await vm.SaveDiagnosisWithReportCommand.ExecuteAsync(null);
+
+        _workshop.Verify(w => w.AddRepairAsync(It.IsAny<RepairRecord>(), It.IsAny<CancellationToken>()), Times.Once);
+        vm.IsStatusError.Should().BeTrue();
+        vm.StatusMessage.Should().Contain("Teşhis kaydedildi").And.Contain("başka bir programda açık");
+        vm.IsBusy.Should().BeFalse();
+        await vm.DisconnectCommand.ExecuteAsync(null);
+    }
+
+    [Fact]
+    public async Task Plain_Save_Does_Not_Create_Report()
+    {
+        var vm = await ConnectedAsync();
+
+        await vm.SaveDiagnosisCommand.ExecuteAsync(null);
+
+        _reports.Verify(r => r.ExportAsync(It.IsAny<Customer>(), It.IsAny<Vehicle>(), It.IsAny<RepairRecord>()), Times.Never);
+        await vm.DisconnectCommand.ExecuteAsync(null);
+    }
+
+    [Fact]
+    public async Task SaveWithReport_Is_Disabled_Without_Known_Vehicle()
+    {
+        _workshop.Setup(w => w.FindVehicleByVinAsync(Vin, It.IsAny<CancellationToken>())).ReturnsAsync((Vehicle?)null);
+        var vm = await ConnectedAsync();
+
+        vm.SaveDiagnosisWithReportCommand.CanExecute(null).Should().BeFalse();
+        await vm.DisconnectCommand.ExecuteAsync(null);
+    }
+
     // ---- Gerçek sahte cihaz + gerçek veritabanı ----
 
     [Fact]
@@ -344,9 +426,8 @@ public class VehicleRecognitionTests
             CustomerId = customer.Id, Vin = FakeElmTransport.FaultyVehicleVin, Plate = "23 XYZ 789", Make = "Mercedes", Model = "E200"
         });
 
-        var customersVm = new CustomersViewModel(db.Service, _dialogs.Object);
-        var vm = new MainViewModel(_ports.Object, new ObdServiceFactory(), _dialogs.Object, db.Service, customersVm)
-        { PollInterval = TimeSpan.FromMilliseconds(20) };
+        var vm = Create(new ObdServiceFactory(), db.Service);
+        vm.PollInterval = TimeSpan.FromMilliseconds(20);
         vm.SelectedScenario = vm.Scenarios.First(s => s.Value == FakeScenario.Faulty);
 
         await vm.ConnectCommand.ExecuteAsync(null);
@@ -368,8 +449,7 @@ public class VehicleRecognitionTests
     public async Task Fake_Normal_Car_Not_In_Database_Offers_Registration()
     {
         using var db = new InMemoryDatabase();
-        var vm = new MainViewModel(_ports.Object, new ObdServiceFactory(), _dialogs.Object, db.Service,
-            new CustomersViewModel(db.Service, _dialogs.Object));
+        var vm = Create(new ObdServiceFactory(), db.Service);
 
         await vm.ConnectCommand.ExecuteAsync(null);
 

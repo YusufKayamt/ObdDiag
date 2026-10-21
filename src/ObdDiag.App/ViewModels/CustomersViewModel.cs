@@ -15,6 +15,7 @@ public sealed partial class CustomersViewModel : ObservableObject
 {
     private readonly IWorkshopService _workshop;
     private readonly IDialogService _dialogs;
+    private readonly IReportService _reports;
 
     // Liste yenilenirken listenin seçimi geçici olarak boşalır; o sırada tepki vermemek için.
     private bool _loadingCustomers;
@@ -23,10 +24,11 @@ public sealed partial class CustomersViewModel : ObservableObject
     // Canlı ekrandan gelen, henüz kaydedilmemiş VIN. Müşteri seçilince araç formu temizlense de bu geri yazılır.
     private string? _pendingVin;
 
-    public CustomersViewModel(IWorkshopService workshop, IDialogService dialogs)
+    public CustomersViewModel(IWorkshopService workshop, IDialogService dialogs, IReportService reports)
     {
         _workshop = workshop;
         _dialogs = dialogs;
+        _reports = reports;
     }
 
     /// <summary>Bir araç kaydedilince tetiklenir (canlı veri ekranı kendini güncellesin diye).</summary>
@@ -47,6 +49,11 @@ public sealed partial class CustomersViewModel : ObservableObject
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(DeleteVehicleCommand), nameof(AddRepairCommand))]
     private Vehicle? _selectedVehicle;
+
+    /// <summary>Tamir geçmişinde seçili satır ("PDF Rapor Al" bu kayıt için çalışır).</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ExportReportCommand))]
+    private RepairHistoryItem? _selectedHistoryItem;
 
     // ---- Müşteri formu ----
 
@@ -387,6 +394,30 @@ public sealed partial class CustomersViewModel : ObservableObject
         catch (Exception ex)
         {
             ShowError(ex);
+        }
+    }
+
+    // ================= PDF rapor =================
+
+    private bool CanExportReport() => SelectedHistoryItem is not null;
+
+    [RelayCommand(CanExecute = nameof(CanExportReport))]
+    private async Task ExportReportAsync()
+    {
+        var item = SelectedHistoryItem;
+        var vehicle = SelectedVehicle;
+        var customer = SelectedCustomer;
+        if (item is null || vehicle is null || customer is null) return;
+
+        try
+        {
+            var path = await _reports.ExportAsync(customer, vehicle, item.Record);
+            if (path is not null)
+                SetMessage($"PDF rapor oluşturuldu: {path}");
+        }
+        catch (Exception ex)
+        {
+            SetMessage($"PDF rapor oluşturulamadı. {ReportService.DescribeError(ex)}", isError: true);
         }
     }
 

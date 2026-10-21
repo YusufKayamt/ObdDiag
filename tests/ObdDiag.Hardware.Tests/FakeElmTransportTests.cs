@@ -48,6 +48,7 @@ public class FakeElmTransportTests
     [InlineData(FakeScenario.Faulty)]
     [InlineData(FakeScenario.NotConnected)]
     [InlineData(FakeScenario.Slow)]
+    [InlineData(FakeScenario.Idle)]
     public async Task Every_Response_Ends_With_Prompt(FakeScenario scenario)
     {
         var fake = await CreateAsync(scenario, TimeSpan.Zero);

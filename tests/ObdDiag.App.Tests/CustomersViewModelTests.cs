@@ -13,11 +13,12 @@ public class CustomersViewModelTests : IDisposable
 
     private readonly InMemoryDatabase _db = new();
     private readonly Mock<IDialogService> _dialogs = new();
+    private readonly Mock<IReportService> _reports = new();
     private readonly CustomersViewModel _vm;
 
     public CustomersViewModelTests()
     {
-        _vm = new CustomersViewModel(_db.Service, _dialogs.Object);
+        _vm = new CustomersViewModel(_db.Service, _dialogs.Object, _reports.Object);
     }
 
     public void Dispose() => _db.Dispose();
@@ -370,6 +371,64 @@ public class CustomersViewModelTests : IDisposable
         _vm.VehicleVin.Should().BeEmpty();
     }
 
+    // ---- PDF rapor (tamir geçmişinden) ----
+
+    [Fact]
+    public async Task Report_Needs_A_Selected_History_Row()
+    {
+        await _vm.InitializeAsync();
+        await AddCustomerViaUiAsync("Ali");
+        await AddVehicleViaUiAsync(Vin1, "34 ABC 123");
+        _vm.NewRepairDescription = "Yağ değişimi";
+        await _vm.AddRepairCommand.ExecuteAsync(null);
+
+        _vm.ExportReportCommand.CanExecute(null).Should().BeFalse();
+
+        _vm.SelectedHistoryItem = _vm.History[0];
+        _vm.ExportReportCommand.CanExecute(null).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Selected_History_Row_Is_Exported_With_Its_Customer_And_Vehicle()
+    {
+        Customer? c = null; Vehicle? v = null; RepairRecord? r = null;
+        _reports.Setup(s => s.ExportAsync(It.IsAny<Customer>(), It.IsAny<Vehicle>(), It.IsAny<RepairRecord>()))
+            .Callback<Customer, Vehicle, RepairRecord>((cc, vv, rr) => { c = cc; v = vv; r = rr; })
+            .ReturnsAsync(@"C:\Raporlar\rapor.pdf");
+        await _vm.InitializeAsync();
+        await AddCustomerViaUiAsync("Ali");
+        await AddVehicleViaUiAsync(Vin1, "34 ABC 123");
+        _vm.NewRepairDescription = "Triger kayışı değişti";
+        await _vm.AddRepairCommand.ExecuteAsync(null);
+        _vm.SelectedHistoryItem = _vm.History[0];
+
+        await _vm.ExportReportCommand.ExecuteAsync(null);
+
+        c!.FullName.Should().Be("Ali");
+        v!.Vin.Should().Be(Vin1);
+        r!.Description.Should().Be("Triger kayışı değişti");
+        _vm.Message.Should().Contain("rapor.pdf");
+        _vm.IsError.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Report_Error_Is_Shown_As_Message()
+    {
+        _reports.Setup(s => s.ExportAsync(It.IsAny<Customer>(), It.IsAny<Vehicle>(), It.IsAny<RepairRecord>()))
+            .ThrowsAsync(new UnauthorizedAccessException());
+        await _vm.InitializeAsync();
+        await AddCustomerViaUiAsync("Ali");
+        await AddVehicleViaUiAsync(Vin1, "34 ABC 123");
+        _vm.NewRepairDescription = "Yağ değişimi";
+        await _vm.AddRepairCommand.ExecuteAsync(null);
+        _vm.SelectedHistoryItem = _vm.History[0];
+
+        await _vm.ExportReportCommand.ExecuteAsync(null);
+
+        _vm.IsError.Should().BeTrue();
+        _vm.Message.Should().Contain("yazma izni yok");
+    }
+
     // ---- Tamir geçmişi ----
 
     [Fact]
@@ -469,7 +528,7 @@ public class CustomersViewModelTests : IDisposable
         var broken = new Mock<ObdDiag.Data.IWorkshopService>();
         broken.Setup(w => w.GetCustomersAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("disk hatası"));
-        var vm = new CustomersViewModel(broken.Object, _dialogs.Object);
+        var vm = new CustomersViewModel(broken.Object, _dialogs.Object, _reports.Object);
 
         await vm.InitializeAsync();
 

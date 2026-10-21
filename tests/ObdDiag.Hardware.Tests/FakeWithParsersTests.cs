@@ -33,6 +33,57 @@ public class FakeWithParsersTests
         throttle.Should().BeInRange(0, 100);
     }
 
+    /// <summary>Rölantideki aracın değerlerini verilen saniyede okur.</summary>
+    private static async Task<(double Rpm, int Speed, int Temp, double Throttle)> ReadIdleAt(double seconds)
+    {
+        var fake = new FakeElmTransport(FakeScenario.Idle, () => TimeSpan.FromSeconds(seconds));
+        await fake.ConnectAsync();
+        await fake.SendCommandAsync("ATE0");
+
+        PidParser.TryParseRpm(await fake.SendCommandAsync("010C"), out var rpm).Should().BeTrue();
+        PidParser.TryParseSpeed(await fake.SendCommandAsync("010D"), out var speed).Should().BeTrue();
+        PidParser.TryParseCoolantTemp(await fake.SendCommandAsync("0105"), out var temp).Should().BeTrue();
+        PidParser.TryParseThrottle(await fake.SendCommandAsync("0111"), out var throttle).Should().BeTrue();
+        return (rpm, speed, temp, throttle);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(13.7)]
+    [InlineData(60)]
+    [InlineData(400)]
+    public async Task Idle_Vehicle_Stands_Still_With_Released_Pedal(double seconds)
+    {
+        var (rpm, speed, _, throttle) = await ReadIdleAt(seconds);
+
+        speed.Should().Be(0);
+        rpm.Should().BeInRange(750, 1100);
+        throttle.Should().BeInRange(0, 4);
+    }
+
+    [Fact]
+    public async Task Idle_Rpm_Drops_As_Engine_Warms_Up()
+    {
+        var cold = await ReadIdleAt(0);     // 30 °C
+        var warm = await ReadIdleAt(400);   // 90 °C
+
+        cold.Temp.Should().Be(30);
+        warm.Temp.Should().Be(90);
+        cold.Rpm.Should().BeGreaterThan(warm.Rpm + 150);
+        warm.Rpm.Should().BeInRange(750, 850);
+    }
+
+    [Fact]
+    public async Task Idle_Vehicle_Has_No_Faults_And_Normal_Vin()
+    {
+        var fake = await ReadyAsync(FakeScenario.Idle);
+
+        DtcParser.TryParse(await fake.SendCommandAsync("03"), out var codes).Should().BeTrue();
+        codes.Should().BeEmpty();
+        VinParser.TryParse(await fake.SendCommandAsync("0902"), out var vin).Should().BeTrue();
+        vin.Should().Be(FakeElmTransport.NormalVehicleVin);
+    }
+
     [Fact]
     public async Task Faulty_Vehicle_Codes_Are_Parsed_And_Cleared()
     {

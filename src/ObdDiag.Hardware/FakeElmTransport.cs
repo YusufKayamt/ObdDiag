@@ -45,7 +45,7 @@ public sealed class FakeElmTransport : IElmTransport
         _faultBytes = InitialFaultBytes();
     }
 
-    /// <summary>"Normal" ve "Yavaş" senaryodaki sahte aracın VIN'i.</summary>
+    /// <summary>"Normal", "Rölanti" ve "Yavaş" senaryodaki sahte aracın VIN'i.</summary>
     public const string NormalVehicleVin = "WVWZZZ1JZXW000001";
 
     /// <summary>"Arızalı" senaryodaki sahte aracın VIN'i.</summary>
@@ -224,17 +224,26 @@ public sealed class FakeElmTransport : IElmTransport
 
     private double Seconds => _clock().TotalSeconds;
 
-    /// <summary>Hız 10-110 km/s arasında 40 saniyede bir gidip gelir.</summary>
-    private int Speed() => (int)Math.Round(60 + 50 * Math.Sin(2 * Math.PI * Seconds / 40));
+    private bool IsIdle => _scenario == FakeScenario.Idle;
 
-    /// <summary>Devir hıza bağlı artar, üstüne küçük bir dalgalanma biner.</summary>
-    private double Rpm() => 800 + Speed() * 22 + 150 * Math.Sin(2 * Math.PI * Seconds / 7);
+    /// <summary>Hız 10-110 km/s arasında 40 saniyede bir gidip gelir. Rölantide araç durur (0 km/s).</summary>
+    private int Speed() => IsIdle ? 0 : (int)Math.Round(60 + 50 * Math.Sin(2 * Math.PI * Seconds / 40));
+
+    /// <summary>
+    /// Yolda: devir hıza bağlı artar, üstüne küçük bir dalgalanma biner.
+    /// Rölantide: ~800 devir; motor soğukken beyin (ECU) devri biraz yükseltir, ısındıkça düşer.
+    /// </summary>
+    private double Rpm() => IsIdle
+        ? 800 + Math.Max(0, 70 - CoolantTemp()) * 6 + 20 * Math.Sin(2 * Math.PI * Seconds / 2)
+        : 800 + Speed() * 22 + 150 * Math.Sin(2 * Math.PI * Seconds / 7);
 
     /// <summary>Motor 30 °C'den başlayıp yavaşça 90 °C'ye ısınır (5 dakikada).</summary>
     private int CoolantTemp() => (int)Math.Min(90, 30 + Seconds * 0.2);
 
-    /// <summary>Gaz pedalı yüzdesi hıza göre artar.</summary>
-    private double Throttle() => Math.Clamp(10 + Speed() * 0.4 + 5 * Math.Sin(2 * Math.PI * Seconds / 3), 0, 100);
+    /// <summary>Gaz pedalı yüzdesi hıza göre artar. Rölantide pedal bırakılmıştır (%1-3 civarı).</summary>
+    private double Throttle() => IsIdle
+        ? 2 + Math.Sin(2 * Math.PI * Seconds / 5)
+        : Math.Clamp(10 + Speed() * 0.4 + 5 * Math.Sin(2 * Math.PI * Seconds / 3), 0, 100);
 
     // ---- Cevap biçimlendirme ----
 

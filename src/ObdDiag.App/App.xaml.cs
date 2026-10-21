@@ -7,6 +7,7 @@ using ObdDiag.App.ViewModels;
 using ObdDiag.Core.Interfaces;
 using ObdDiag.Data;
 using ObdDiag.Hardware;
+using ObdDiag.Reporting;
 
 namespace ObdDiag.App;
 
@@ -23,6 +24,9 @@ public partial class App : Application
             ? custom
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ObdDiag", "obddiag.db");
 
+    /// <summary>Ayar dosyasının (settings.json) ve logonun saklandığı klasör.</summary>
+    public static string SettingsFolder => Path.GetDirectoryName(Path.GetFullPath(DatabasePath))!;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -35,6 +39,11 @@ public partial class App : Application
                 services.AddSingleton<IComPortProvider, SerialPortProvider>();
                 services.AddSingleton<IObdServiceFactory, ObdServiceFactory>();
                 services.AddSingleton<IDialogService, WpfDialogService>();
+                // Ayarlar (işletme adı, logo) veritabanı dosyasıyla aynı klasörde saklanır.
+                services.AddSingleton<ISettingsStore>(_ => new JsonSettingsStore(SettingsFolder));
+                services.AddSingleton<IReportGenerator, PdfReportGenerator>();
+                services.AddSingleton<IReportService, ReportService>();
+                services.AddSingleton<SettingsViewModel>();
                 services.AddSingleton<CustomersViewModel>();
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<MainWindow>();

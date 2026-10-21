@@ -17,6 +17,7 @@ public class MainViewModelTests
     private readonly Mock<IDialogService> _dialogs = new();
     private readonly Mock<IObdService> _service = new();
     private readonly Mock<IWorkshopService> _workshop = new();
+    private readonly Mock<IReportService> _reports = new();
 
     private ConnectionSettings? _lastSettings;
 
@@ -39,8 +40,9 @@ public class MainViewModelTests
     }
 
     private MainViewModel Create(IObdServiceFactory? factory = null) =>
-        new(_ports.Object, factory ?? _factory.Object, _dialogs.Object, _workshop.Object,
-            new CustomersViewModel(_workshop.Object, _dialogs.Object))
+        new(_ports.Object, factory ?? _factory.Object, _dialogs.Object, _workshop.Object, _reports.Object,
+            new CustomersViewModel(_workshop.Object, _dialogs.Object, _reports.Object),
+            TestViewModels.Settings(_dialogs.Object))
         {
             PollInterval = TimeSpan.FromMilliseconds(10)
         };
@@ -73,7 +75,8 @@ public class MainViewModelTests
         vm.UseFakeDevice.Should().BeTrue();
         vm.Ports.Should().Equal("COM3", "COM4");
         vm.SelectedPort.Should().Be("COM3");
-        vm.Scenarios.Should().HaveCount(4);
+        vm.Scenarios.Should().HaveCount(5);
+        vm.SelectedScenario.Value.Should().Be(FakeScenario.Idle); // serviste en sık durum varsayılan
         vm.IsConnected.Should().BeFalse();
         vm.RpmText.Should().Be("—");
         vm.ConnectCommand.CanExecute(null).Should().BeTrue();

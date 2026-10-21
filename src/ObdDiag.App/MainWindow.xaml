@@ -62,7 +62,7 @@
                                     <CheckBox Content="Sahte cihaz kullan" VerticalAlignment="Center"
                                               IsChecked="{Binding UseFakeDevice}"
                                               IsEnabled="{Binding CanEditConnection}" />
-                                    <ComboBox Width="220" Margin="12,0,0,0"
+                                    <ComboBox Width="250" Margin="12,0,0,0"
                                               ItemsSource="{Binding Scenarios}"
                                               DisplayMemberPath="Title"
                                               SelectedItem="{Binding SelectedScenario}"
@@ -205,14 +205,19 @@
                                     <TextBox Text="{Binding RepairNote, UpdateSourceTrigger=PropertyChanged}"
                                              AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" MaxHeight="80"
                                              VerticalScrollBarVisibility="Auto" />
-                                    <DockPanel Margin="0,8,0,0">
-                                        <TextBlock DockPanel.Dock="Left" Text="Km:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                        <TextBox DockPanel.Dock="Left" Width="90" Text="{Binding RepairMileage, UpdateSourceTrigger=PropertyChanged}" />
-                                        <Button DockPanel.Dock="Right" Content="Teşhisi Kaydet"
-                                                Style="{StaticResource PrimaryButtonStyle}"
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                        <TextBlock Text="Km:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <TextBox Width="90" Text="{Binding RepairMileage, UpdateSourceTrigger=PropertyChanged}" />
+                                    </StackPanel>
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <Button Content="Teşhisi Kaydet" Margin="0,0,8,4"
+                                                Style="{StaticResource SecondaryButtonStyle}"
                                                 Command="{Binding SaveDiagnosisCommand}" />
-                                    </DockPanel>
-                                    <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"
+                                        <Button Content="Kaydet + PDF Rapor" Margin="0,0,0,4"
+                                                Style="{StaticResource PrimaryButtonStyle}"
+                                                Command="{Binding SaveDiagnosisWithReportCommand}" />
+                                    </WrapPanel>
+                                    <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"
                                                Text="Kayıt için bağlı olmalı ve araç tanınmış olmalı (şasi no kayıtlı)." />
                                 </StackPanel>
                             </Grid>
@@ -225,6 +230,12 @@
             <TabItem>
                 <TabItem.Header><TextBlock Text="Müşteri ve Araçlar" FontWeight="SemiBold" Margin="10,3" /></TabItem.Header>
                 <views:CustomersView DataContext="{Binding Customers}" />
+            </TabItem>
+
+            <!-- ===================== SEKME 3: AYARLAR ===================== -->
+            <TabItem>
+                <TabItem.Header><TextBlock Text="Ayarlar" FontWeight="SemiBold" Margin="10,3" /></TabItem.Header>
+                <views:SettingsView DataContext="{Binding Settings}" />
             </TabItem>
         </TabControl>
 

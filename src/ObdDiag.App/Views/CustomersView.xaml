@@ -157,6 +157,7 @@
                     <TextBlock Text="TAMİR GEÇMİŞİ (seçili araç)" Style="{StaticResource CardTitleStyle}" />
 
                     <ListBox Grid.Row="1" ItemsSource="{Binding History}" Margin="0,8,0,8"
+                             SelectedItem="{Binding SelectedHistoryItem}"
                              BorderThickness="0" Background="Transparent"
                              HorizontalContentAlignment="Stretch"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -200,6 +201,9 @@
                     </ListBox>
 
                     <StackPanel Grid.Row="2">
+                        <Button Content="Seçili Kaydın PDF Raporunu Al" HorizontalAlignment="Stretch" Margin="0,0,0,8"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Command="{Binding ExportReportCommand}" />
                         <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,1,0,0" Margin="0,0,0,4" />
                         <TextBlock Text="Elle tamir kaydı ekle" Style="{StaticResource FieldLabelStyle}" />
                         <TextBox Text="{Binding NewRepairDescription, UpdateSourceTrigger=PropertyChanged}"

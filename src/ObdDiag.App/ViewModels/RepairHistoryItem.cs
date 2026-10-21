@@ -4,7 +4,8 @@ using ObdDiag.Data.Entities;
 namespace ObdDiag.App.ViewModels;
 
 /// <summary>Tamir geçmişi listesindeki bir satırın ekranda görünen hali.</summary>
-public sealed record RepairHistoryItem(string DateText, string Description, string? MileageText, string? CodesText, string? SnapshotText)
+/// <param name="Record">Satırın ait olduğu kayıt (PDF rapor bu kayıttan üretilir).</param>
+public sealed record RepairHistoryItem(string DateText, string Description, string? MileageText, string? CodesText, string? SnapshotText, RepairRecord Record)
 {
     public static RepairHistoryItem From(RepairRecord record)
     {
@@ -30,6 +31,7 @@ public sealed record RepairHistoryItem(string DateText, string Description, stri
             record.Description,
             record.Mileage is { } km ? $"{km:N0} km".Replace(',', '.') : null,
             codes,
-            snapshot);
+            snapshot,
+            record);
     }
 }
